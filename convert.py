@@ -1,19 +1,23 @@
 import argparse
 import os
+import importlib
 import torch
-from convnet_utils import switch_conv_bn_impl, switch_deploy_flag, build_model
+from DiverseBranchBlock.convnet_utils import switch_conv_bn_impl, switch_deploy_flag, build_model
+
+from torchsummary import summary
 
 parser = argparse.ArgumentParser(description='DBB Conversion')
 parser.add_argument('load', metavar='LOAD', help='path to the weights file')
 parser.add_argument('save', metavar='SAVE', help='path to the weights file')
-parser.add_argument('-a', '--arch', metavar='ARCH', default='ResNet-18')
+parser.add_argument('--backbone', type=str, default='resnet18', help='the name of backbone')
+parser.add_argument('--n_classes', default=4, type=int, help='number of classes')
 
 def convert():
     args = parser.parse_args()
 
     switch_conv_bn_impl('DBB')
     switch_deploy_flag(False)
-    train_model = build_model(args.arch)
+    train_model = getattr(importlib.import_module('network'),'create_' + args.backbone)(args.n_classes)
 
     if 'hdf5' in args.load:
         from utils import model_load_hdf5

@@ -1,4 +1,5 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 import importlib
 import random
 import warnings
@@ -13,6 +14,7 @@ from torch.nn.functional import cross_entropy, pairwise_distance, triplet_margin
 from dataset import load_train_data, sampling_strategy
 from test import test
 from utils import performance_display
+from DiverseBranchBlock.convnet_utils import switch_deploy_flag, switch_conv_bn_impl, build_model
 
 def seed_torch(seed=1):
     random.seed(seed)
@@ -30,6 +32,7 @@ def parse_arguments():
     
     parser.add_argument('--backbone', type=str, default='resnet18', help='the name of backbone')
     parser.add_argument('--n_classes', default=4, type=int, help='number of classes')
+    parser.add_argument('--blocktype', metavar='BLK', default='DBB', choices=['DBB', 'ACB', 'base'])
 
     parser.add_argument('--data_path', type=str, default='Dataset', help='the path of dataset')
     parser.add_argument('--crop_shape', default=256, type=int, help='crop shape')
@@ -37,7 +40,7 @@ def parse_arguments():
     parser.add_argument('--train_batch_size', default=100, type=int, help='training batch size')
     parser.add_argument('--val_batch_size', default=100, type=int, help='val_data batch size')
 
-    parser.add_argument('--epochs', default=100, type=int, help='number of epochs tp train for')
+    parser.add_argument('--epochs', default=1, type=int, help='number of epochs tp train for')
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
     parser.add_argument('--lambda_', default=0.5, type=float, help='loss func weight')
     parser.add_argument('--mu_', default=10, type=float, help='loss margin')
@@ -116,7 +119,7 @@ def train(model, train_dataset, train_target_dict, val_dataset, val_target_dict,
         val_losses.append(val_loss)
 
         # model save
-        torch.save(model.state_dict(), args.output_path+'/epoch_{0}_train_loss_{1:>0.5}_val_loss_{2:>0.5}.ckpt'.format(epoch,train_loss,val_loss))
+        torch.save(model.state_dict(), args.output_path+'/epoch_{0}_train_loss_{1:>0.5}_val_loss_{2:>0.5}.pth'.format(epoch,train_loss,val_loss))
 
     acc_plot = {}
     acc_plot['train'] = train_accs
@@ -140,6 +143,8 @@ if __name__ == '__main__':
     train_dataset, train_target_dict, val_dataset, val_target_dict = load_train_data(args.data_path, crop_shape=32, split_rate=0.9)
 
     # build model
+    switch_deploy_flag(False)
+    switch_conv_bn_impl(args.blocktype)
     model = getattr(importlib.import_module('network'),'create_' + args.backbone)(args.n_classes)
     model = model.double().to(args.device)
 

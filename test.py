@@ -10,6 +10,9 @@ import torch
 import torch.backends.cudnn as cudnn
 from torch.nn.functional import cross_entropy, softmax
 from dataset import load_test_data
+from torchsummary import summary
+
+from DiverseBranchBlock.convnet_utils import switch_conv_bn_impl, switch_deploy_flag, build_model
 
 def seed_torch(seed=1):
     random.seed(seed)
@@ -36,7 +39,7 @@ def parse_arguments():
     parser.add_argument('--device', default="cuda" if torch.cuda.is_available() else "cpu", type=str, help='divice')
 
     parser.add_argument('--output_path', default="output", type=str, help='output path')
-    parser.add_argument('--ck_path', default="****.ckpt", type=str, help='check point path')
+    parser.add_argument('--ck_path', default="****.pth", type=str, help='check point path')
     parser.add_argument('--seed', type=int, default=1, help='Random seed, a int number')
     
     return parser.parse_args()
@@ -57,7 +60,7 @@ def test(model, dataset, batch_size, device, test=False):
             y_pred = model(data)
 
             loss = cross_entropy(y_pred, target)
-            total_loss += loss
+            total_loss += loss.item()
 
             target = target.data.cpu().numpy()
             predict = torch.max(softmax(y_pred).data, 1)[1].cpu().numpy()
@@ -83,10 +86,28 @@ if __name__ == '__main__':
     test_dataset = load_test_data(args.data_path, crop_shape=32)
 
     # build model
-    model = getattr(importlib.import_module('network'),'create_' + args.backbone)(args.n_classes)
-    model.load_state_dict(torch.load(os.path.join(args.out_path,args.ck_path)))
-    model = model.double().to(args.device)
+    switch_conv_bn_impl('DBB')
+    switch_deploy_flag(False)
+    model = getattr(importlib.import_module('network'),'create_' + args.backbone)(args.n_classes).to(args.device)
+
+    print('='*20,'Before Convert','='*20)
+    summary(model,(3, 64, 64))
+
+    checkpoint = torch.load(os.path.join(args.out_path,args.ck_path))
+    if 'state_dict' in checkpoint:
+        checkpoint = checkpoint['state_dict']
+    ckpt = {k.replace('module.', ''): v for k, v in checkpoint.items()}  # strip the names
+    model.load_state_dict(ckpt)
+
+    for m in model.modules():
+        if hasattr(m, 'switch_to_deploy'):
+            m.switch_to_deploy()
+
+    print('='*20,'After Convert','='*20)
     
+    summary(model,(3, 64, 64))
+
+    model = model.double()
 
     # test phase
     test_acc, test_loss, report, confusion = test(model, test_dataset, args.test_batch_size, args.device, test=True)
